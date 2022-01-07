@@ -1,0 +1,5 @@
+[package]
+name = "emulator_6502_cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tobias de Bruijn <t.debruijn@array21.dev>"]
