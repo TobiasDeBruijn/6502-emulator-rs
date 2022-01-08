@@ -49,3 +49,12 @@ pub const PHA_IMPLIED: u8 = 0x48;
 pub const PHP_IMPLIED: u8 = 0x08;
 pub const PLA_IMPLIED: u8 = 0x68;
 pub const PLP_IMPLIED: u8 = 0x28;
+
+pub const AND_IMMEDIATE: u8 = 0x29;
+pub const AND_ZERO_PAGE: u8 = 0x25;
+pub const AND_ZERO_PAGE_X: u8 = 0x35;
+pub const AND_ABSOLUTE: u8 = 0x2D;
+pub const AND_ABSOLUTE_X: u8 = 0x3D;
+pub const AND_ABSOLUTE_Y: u8 = 0x39;
+pub const AND_INDIRECT_X: u8 = 0x21;
+pub const AND_INDIRECT_Y: u8 = 0x31;

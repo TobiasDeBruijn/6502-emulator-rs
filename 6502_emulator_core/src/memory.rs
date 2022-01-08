@@ -1,3 +1,5 @@
+use log::debug;
+
 pub const MAX_MEMORY: usize = 1024 * 64;
 
 pub struct Memory {
@@ -15,6 +17,9 @@ impl Default for Memory {
 impl Memory {
     /// Reset the memory
     pub fn reset(&mut self) {
+        #[cfg(test)]
+        debug!("Resetting memory");
+
         *self = Self::default();
     }
 
