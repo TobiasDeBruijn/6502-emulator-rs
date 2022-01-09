@@ -498,12 +498,34 @@ impl Cpu {
                 let addr = self.addr_absolute_x_5(memory, &mut cycles);
                 self.increment_memory(memory, addr, &mut cycles);
             },
-            INX => {
+            INX_IMPLIED => {
                 self.increment_register(Register::X, &mut cycles);
             },
-            INY => {
+            INY_IMPLIED => {
                 self.increment_register(Register::Y, &mut cycles);
-            }
+            },
+            DEC_ZERO_PAGE => {
+                let zp_addr = self.fetch_byte(memory, &mut cycles);
+                self.decrement_memory(memory, zp_addr as u16, &mut cycles);
+            },
+            DEC_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.decrement_memory(memory, addr, &mut cycles);
+            },
+            DEC_ABSOLUTE => {
+                let addr = self.fetch_word(memory, &mut cycles);
+                self.decrement_memory(memory, addr, &mut cycles);
+            },
+            DEC_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x_5(memory, &mut cycles);
+                self.decrement_memory(memory, addr, &mut cycles);
+            },
+            DEX_IMPLIED => {
+                self.decrement_register(Register::X, &mut cycles);
+            },
+            DEY_IMPLIED => {
+                self.decrement_register(Register::Y, &mut cycles);
+            },
             _ => {}
         }
 
@@ -522,9 +544,27 @@ impl Cpu {
         Self::write_byte(memory, address, inc, cycles);
     }
 
+    /// Decrement a location in memory
+    fn decrement_memory(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, address: u16, cycles: &mut u32) {
+        let value = Self::read_byte(memory, address, cycles);
+        let dec = (Wrapping(value) - Wrapping(1)).0;
+        *cycles -= 1;
+
+        self.flags.set(CpuStatusFlags::ZERO, dec == 0);
+        self.flags.set(CpuStatusFlags::NEGATIVE, dec & NEGATIVE_BIT != 0);
+
+        Self::write_byte(memory, address, dec, cycles);
+    }
+
     /// Increment a register
     fn increment_register(&mut self, register: Register, cycles: &mut u32) {
         self.set_register(register.clone(), (Wrapping(self.get_register(register)) + Wrapping(1)).0);
+        *cycles -= 1;
+    }
+
+    /// Decrement a register
+    fn decrement_register(&mut self, register: Register, cycles: &mut u32) {
+        self.set_register(register.clone(), (Wrapping(self.get_register(register)) - Wrapping(1)).0);
         *cycles -= 1;
     }
 
@@ -2880,7 +2920,7 @@ mod test {
         let mut cpu = Cpu::default();
         let mut memory = BasicMemory::default();
 
-        memory.write(0xFFFC, INX);
+        memory.write(0xFFFC, INX_IMPLIED);
         cpu.register_x = 0x10;
 
         let cycles_left = cpu.execute_single(&mut memory, 2);
@@ -2912,7 +2952,7 @@ mod test {
         let mut cpu = Cpu::default();
         let mut memory = BasicMemory::default();
 
-        memory.write(0xFFFC, INY);
+        memory.write(0xFFFC, INY_IMPLIED);
         cpu.register_y = 0x10;
 
         let cycles_left = cpu.execute_single(&mut memory, 2);
@@ -2931,6 +2971,166 @@ mod test {
 
         cpu.reset();
         cpu.register_y = 0xFF;
+
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.register_y, 0x00);
+        assert!(cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn dec_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, DEC_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0x10);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x20), 0xF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, DEC_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0x00);
+
+        cpu.execute_single(&mut memory, 5);
+        assert_eq!(memory.read(0x20), 0xFF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, DEC_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0x1);
+
+        cpu.execute_single(&mut memory, 5);
+        assert_eq!(memory.read(0x20), 0x00);
+        assert!(cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn dec_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, DEC_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x20;
+        memory.write(0x40, 0x10);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x40), 0xF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn dec_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, DEC_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        memory.write(0x4020, 0x10);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x4020), 0xF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn dec_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, DEC_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.register_x = 0x20;
+        memory.write(0x4040, 0x10);
+
+        let cycles_left = cpu.execute_single(&mut memory, 7);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x4040), 0xF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn dex_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, DEX_IMPLIED);
+        cpu.register_x = 0x10;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_x, 0xF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+
+        cpu.reset();
+        cpu.register_x = 0x00;
+
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.register_x, 0xFF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+
+        cpu.reset();
+        cpu.register_x = 0x01;
+
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.register_x, 0x00);
+        assert!(cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn dey_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, DEY_IMPLIED);
+        cpu.register_y = 0x10;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_y, 0xF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+
+        cpu.reset();
+        cpu.register_y = 0x00;
+
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.register_y, 0xFF);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+
+        cpu.reset();
+        cpu.register_y = 0x01;
 
         cpu.execute_single(&mut memory, 2);
         assert_eq!(cpu.register_y, 0x00);
