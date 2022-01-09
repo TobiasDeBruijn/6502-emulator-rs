@@ -1,12 +1,20 @@
+#[cfg(test)]
 use log::debug;
 
 pub const MAX_MEMORY: usize = 1024 * 64;
 
-pub struct Memory {
+pub trait Memory<const N: usize> {
+    fn reset(&mut self);
+    fn write(&mut self, address: u16, value: u8);
+    fn read(&self, address: u16) -> u8;
+}
+
+pub struct BasicMemory {
     data: [u8; MAX_MEMORY],
 }
 
-impl Default for Memory {
+
+impl Default for BasicMemory {
     fn default() -> Self {
         Self {
             data: [0u8; MAX_MEMORY],
@@ -14,9 +22,9 @@ impl Default for Memory {
     }
 }
 
-impl Memory {
+impl Memory<MAX_MEMORY> for BasicMemory {
     /// Reset the memory
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         #[cfg(test)]
         debug!("Resetting memory");
 
@@ -28,7 +36,7 @@ impl Memory {
     /// # Panics
     ///
     /// if the provided address exceeds `MAX_MEMORY`
-    pub fn write(&mut self, address: u16, value: u8) {
+    fn write(&mut self, address: u16, value: u8) {
         if address as usize > MAX_MEMORY {
             panic!("Tried to access memory address outside of memory size");
         }
@@ -41,7 +49,7 @@ impl Memory {
     /// # Panics
     ///
     /// If the provided address exceeds `MAX_MEMORY`
-    pub fn fetch(&self, address: u16) -> u8 {
+    fn read(&self, address: u16) -> u8 {
         if address as usize > MAX_MEMORY {
             panic!("Tried to access memory address outside of memory size");
         }

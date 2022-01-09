@@ -79,3 +79,46 @@ pub const ORA_INDIRECT_Y: u8 = 0x11;
 
 pub const BIT_ZERO_PAGE: u8 = 0x24;
 pub const BIT_ABSOLUTE: u8 = 0x2C;
+
+pub const ADC_IMMEDIATE: u8 = 0x69;
+pub const ADC_ZERO_PAGE: u8 = 0x65;
+pub const ADC_ZERO_PAGE_X: u8 = 0x75;
+pub const ADC_ABSOLUTE: u8 = 0x6D;
+pub const ADC_ABSOLUTE_X: u8 = 0x7D;
+pub const ADC_ABSOLUTE_Y: u8 = 0x79;
+pub const ADC_INDIRECT_X: u8 = 0x61;
+pub const ADC_INDIRECT_Y: u8 = 0x71;
+
+pub const SBC_IMMEDIATE: u8 = 0xE9;
+pub const SBC_ZERO_PAGE: u8 = 0xE5;
+pub const SBC_ZERO_PAGE_X: u8 = 0xF5;
+pub const SBC_ABSOLUTE: u8 = 0xED;
+pub const SBC_ABSOLUTE_X: u8 = 0xFD;
+pub const SBC_ABSOLUTE_Y: u8 = 0xF9;
+pub const SBC_INDIRECT_X: u8 = 0xE1;
+pub const SBC_INDIRECT_Y: u8 = 0xF1;
+
+pub const CMP_IMMEDIATE: u8 = 0xC9;
+pub const CMP_ZERO_PAGE: u8 = 0xC5;
+pub const CMP_ZERO_PAGE_X: u8 = 0xD5;
+pub const CMP_ABSOLUTE: u8 = 0xCD;
+pub const CMP_ABSOLUTE_X: u8 = 0xDD;
+pub const CMP_ABSOLUTE_Y: u8 = 0xD9;
+pub const CMP_INDIRECT_X: u8 = 0xC1;
+pub const CMP_INDIRECT_Y: u8 = 0xD1;
+
+pub const CPX_IMMEDIATE: u8 = 0xE0;
+pub const CPX_ZERO_PAGE: u8 = 0xE4;
+pub const CPX_ABSOLUTE: u8 = 0xEC;
+
+pub const CPY_IMMEDIATE: u8 = 0xC0;
+pub const CPY_ZERO_PAGE: u8 = 0xC4;
+pub const CPY_ABSOLUTE: u8 = 0xCC;
+
+pub const INC_ZERO_PAGE: u8 = 0xE6;
+pub const INC_ZERO_PAGE_X: u8 = 0xF6;
+pub const INC_ABSOLUTE: u8 = 0xEE;
+pub const INC_ABSOLUTE_X: u8 = 0xFE;
+
+pub const INX: u8 = 0xE8;
+pub const INY: u8 = 0xC8;
