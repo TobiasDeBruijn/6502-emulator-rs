@@ -58,3 +58,24 @@ pub const AND_ABSOLUTE_X: u8 = 0x3D;
 pub const AND_ABSOLUTE_Y: u8 = 0x39;
 pub const AND_INDIRECT_X: u8 = 0x21;
 pub const AND_INDIRECT_Y: u8 = 0x31;
+
+pub const EOR_IMMEDIATE: u8 = 0x49;
+pub const EOR_ZERO_PAGE: u8 = 0x45;
+pub const EOR_ZERO_PAGE_X: u8 = 0x55;
+pub const EOR_ABSOLUTE: u8 = 0x4D;
+pub const EOR_ABSOLUTE_X: u8 = 0x5D;
+pub const EOR_ABSOLUTE_Y: u8 = 0x59;
+pub const EOR_INDIRECT_X: u8 = 0x41;
+pub const EOR_INDIRECT_Y: u8 = 0x51;
+
+pub const ORA_IMMEDIATE: u8 = 0x09;
+pub const ORA_ZERO_PAGE: u8 = 0x05;
+pub const ORA_ZERO_PAGE_X: u8 = 0x15;
+pub const ORA_ABSOLUTE: u8 = 0x0D;
+pub const ORA_ABSOLUTE_X: u8 = 0x1D;
+pub const ORA_ABSOLUTE_Y: u8 = 0x19;
+pub const ORA_INDIRECT_X: u8 = 0x01;
+pub const ORA_INDIRECT_Y: u8 = 0x11;
+
+pub const BIT_ZERO_PAGE: u8 = 0x24;
+pub const BIT_ABSOLUTE: u8 = 0x2C;

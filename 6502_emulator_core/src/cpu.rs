@@ -262,10 +262,120 @@ impl Cpu {
                 let address = self.addr_indirect_y(memory, &mut cycles);
                 self.fetch_logical_operation(memory, address, LogicalOperation::And, &mut cycles);
             },
+            EOR_IMMEDIATE => {
+                let value = self.fetch_byte(memory, &mut cycles);
+                self.logical_operation(value, LogicalOperation::Xor);
+            },
+            EOR_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.fetch_logical_operation(memory, zp_address as u16, LogicalOperation::Xor, &mut cycles);
+            },
+            EOR_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.fetch_logical_operation(memory, addr, LogicalOperation::Xor, &mut cycles);
+            },
+            EOR_ABSOLUTE => {
+                let address = self.fetch_word(memory, &mut cycles);
+                self.fetch_logical_operation(memory, address, LogicalOperation::Xor, &mut cycles);
+            },
+            EOR_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x(memory, &mut cycles);
+                self.fetch_logical_operation(memory, addr, LogicalOperation::Xor, &mut cycles);
+            },
+            EOR_ABSOLUTE_Y => {
+                let addr = self.addr_absolute_y(memory, &mut cycles);
+                self.fetch_logical_operation(memory, addr, LogicalOperation::Xor, &mut cycles);
+            },
+            EOR_INDIRECT_X => {
+                let address = self.addr_indirect_x(memory, &mut cycles);
+                self.fetch_logical_operation(memory, address, LogicalOperation::Xor, &mut cycles);
+            },
+            EOR_INDIRECT_Y => {
+                let address = self.addr_indirect_y(memory, &mut cycles);
+                self.fetch_logical_operation(memory, address, LogicalOperation::Xor, &mut cycles);
+            },
+            ORA_IMMEDIATE => {
+                let value = self.fetch_byte(memory, &mut cycles);
+                self.logical_operation(value, LogicalOperation::Or);
+            },
+            ORA_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.fetch_logical_operation(memory, zp_address as u16, LogicalOperation::Or, &mut cycles);
+            },
+            ORA_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.fetch_logical_operation(memory, addr, LogicalOperation::Or, &mut cycles);
+            },
+            ORA_ABSOLUTE => {
+                let address = self.fetch_word(memory, &mut cycles);
+                self.fetch_logical_operation(memory, address, LogicalOperation::Or, &mut cycles);
+            },
+            ORA_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x(memory, &mut cycles);
+                self.fetch_logical_operation(memory, addr, LogicalOperation::Or, &mut cycles);
+            },
+            ORA_ABSOLUTE_Y => {
+                let addr = self.addr_absolute_y(memory, &mut cycles);
+                self.fetch_logical_operation(memory, addr, LogicalOperation::Or, &mut cycles);
+            },
+            ORA_INDIRECT_X => {
+                let address = self.addr_indirect_x(memory, &mut cycles);
+                self.fetch_logical_operation(memory, address, LogicalOperation::Or, &mut cycles);
+            },
+            ORA_INDIRECT_Y => {
+                let address = self.addr_indirect_y(memory, &mut cycles);
+                self.fetch_logical_operation(memory, address, LogicalOperation::Or, &mut cycles);
+            },
+            BIT_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.bit_test(memory, zp_address as u16, &mut cycles);
+            },
+            BIT_ABSOLUTE => {
+                let address = self.fetch_word(memory, &mut cycles);
+                self.bit_test(memory, address, &mut cycles);
+            }
             _ => {}
         }
 
         cycles
+    }
+
+    /// Perform a bit test on the value in the provided memory address
+    fn bit_test(&mut self, memory: &Memory, address: u16, cycles: &mut u32) {
+        let value = Self::read_byte(memory, address, cycles);
+        let result = value | self.register_accumulator;
+
+        if result == 0 {
+            #[cfg(test)]
+            debug!("Setting zero flag");
+            self.flags.set(CpuStatusFlags::ZERO, true);
+        } else {
+            #[cfg(test)]
+            debug!("Unsetting zero flag");
+            self.flags.set(CpuStatusFlags::ZERO, false);
+        }
+
+        // Check the 6th bit (counted from 0)
+        if result & (1 << 6) != 0 {
+            #[cfg(test)]
+            debug!("Setting overflow flag");
+            self.flags.set(CpuStatusFlags::OVERFLOW, true);
+        } else {
+            #[cfg(test)]
+            debug!("Unsetting overflow flag");
+            self.flags.set(CpuStatusFlags::OVERFLOW, false);
+        }
+
+        // Check the 6th bit (counted from 0)
+        if result & (1 << 7) != 0 {
+            #[cfg(test)]
+            debug!("Setting negative flag");
+            self.flags.set(CpuStatusFlags::NEGATIVE, true);
+        } else {
+            #[cfg(test)]
+            debug!("Unsetting negative flag");
+            self.flags.set(CpuStatusFlags::NEGATIVE, false);
+        }
     }
 
     /// The address to be accessed by an instruction using indexed zero page addressing is calculated
@@ -454,6 +564,11 @@ impl Cpu {
             debug!("Setting zero flag for register {:?}", register);
 
             self.flags.set(CpuStatusFlags::ZERO, true);
+        } else {
+            #[cfg(test)]
+            debug!("Unsetting zero flag for register {:?}", register);
+
+            self.flags.set(CpuStatusFlags::ZERO, false);
         }
     }
 
@@ -472,6 +587,11 @@ impl Cpu {
             debug!("Setting negative flag for register {:?}", register);
 
             self.flags.set(CpuStatusFlags::NEGATIVE, true);
+        } else {
+            #[cfg(test)]
+            debug!("Unsetting negative flag for register {:?}", register);
+
+            self.flags.set(CpuStatusFlags::NEGATIVE, false);
         }
     }
 
@@ -527,6 +647,7 @@ impl Cpu {
     }
 
     /// Write a word to memory
+    #[allow(unused)]
     fn write_word(memory: &mut Memory, address: u16, word: u16, cycles: &mut u32) {
         let high = (word >> 8) as u8;
         let low = (word & 0xFF) as u8;
@@ -1629,5 +1750,374 @@ mod test {
         let cycles_left = cpu.execute_single(&mut memory, 5);
         assert_eq!(cycles_left, 0);
         assert_eq!(cpu.register_accumulator, 0b1000);
+    }
+
+    #[test]
+    fn eor_immediate() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_IMMEDIATE);
+        memory.write(0xFFFD, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+    }
+
+    #[test]
+    fn eor_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+    }
+
+    #[test]
+    fn eor_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+    }
+
+    #[test]
+    fn eor_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_ABSOLUTE);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0xFFFE, 0x80); // 0x8040
+        memory.write(0x8040, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+    }
+
+    #[test]
+    fn eor_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0xFFFE, 0x80); // 0x8040
+        cpu.register_x = 0x10;
+        memory.write(0x8050, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, EOR_ABSOLUTE_X);
+        memory.write(0xFFFD, 0xFF);
+        memory.write(0xFFFE, 0x00); // 0x00FF
+        cpu.register_x = 0x1;
+        memory.write(0x100, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+    }
+
+    #[test]
+    fn eor_absolute_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_ABSOLUTE_Y);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0xFFFE, 0x80); // 0x8040
+        cpu.register_y = 0x10;
+        memory.write(0x8050, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, EOR_ABSOLUTE_Y);
+        memory.write(0xFFFD, 0xFF);
+        memory.write(0xFFFE, 0x00); // 0x00FF
+        cpu.register_y = 0x1;
+        memory.write(0x100, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+    }
+
+    #[test]
+    fn eor_indirect_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_INDIRECT_X);
+        memory.write(0xFFFD, 0x40);
+        cpu.register_x = 0x10;
+        memory.write(0x50, 0x80);
+        memory.write(0x51, 0x40); // 0x4080;
+        memory.write(0x4080, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+    }
+
+    #[test]
+    fn eor_indirect_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, EOR_INDIRECT_Y);
+        memory.write(0xFFFD, 0x40);
+
+        memory.write(0x40, 0x30);
+        memory.write(0x41, 0x30); // 0x3030;
+
+        cpu.register_y = 0x10;
+        memory.write(0x3040, 0b1010);
+
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0110);
+    }
+
+    #[test]
+    fn ora_immediate() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_IMMEDIATE);
+        memory.write(0xFFFD, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+    }
+
+    #[test]
+    fn ora_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+    }
+
+    #[test]
+    fn ora_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+    }
+
+    #[test]
+    fn ora_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_ABSOLUTE);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0xFFFE, 0x80); // 0x8040
+        memory.write(0x8040, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+    }
+
+    #[test]
+    fn ora_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0xFFFE, 0x80); // 0x8040
+        cpu.register_x = 0x10;
+        memory.write(0x8050, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, ORA_ABSOLUTE_X);
+        memory.write(0xFFFD, 0xFF);
+        memory.write(0xFFFE, 0x00); // 0x00FF
+        cpu.register_x = 0x1;
+        memory.write(0x100, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+    }
+
+    #[test]
+    fn ora_absolute_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_ABSOLUTE_Y);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0xFFFE, 0x80); // 0x8040
+        cpu.register_y = 0x10;
+        memory.write(0x8050, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, ORA_ABSOLUTE_Y);
+        memory.write(0xFFFD, 0xFF);
+        memory.write(0xFFFE, 0x00); // 0x00FF
+        cpu.register_y = 0x1;
+        memory.write(0x100, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+    }
+
+    #[test]
+    fn ora_indirect_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_INDIRECT_X);
+        memory.write(0xFFFD, 0x40);
+        cpu.register_x = 0x10;
+        memory.write(0x50, 0x80);
+        memory.write(0x51, 0x40); // 0x4080;
+        memory.write(0x4080, 0b1010);
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+    }
+
+    #[test]
+    fn ora_indirect_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, ORA_INDIRECT_Y);
+        memory.write(0xFFFD, 0x40);
+
+        memory.write(0x40, 0x30);
+        memory.write(0x41, 0x30); // 0x3030;
+
+        cpu.register_y = 0x10;
+        memory.write(0x3040, 0b1110);
+
+        cpu.register_accumulator = 0b1100;
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1110);
+    }
+
+    #[test]
+    fn bit_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, BIT_ZERO_PAGE);
+        memory.write(0xFFFD, 0x40);
+        memory.write(0x40, 0b1111_0000);
+        cpu.register_accumulator = 0b1111_1111;
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn bit_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = Memory::default();
+
+        memory.write(0xFFFC, BIT_ABSOLUTE);
+        memory.write(0xFFFD, 0x80);
+        memory.write(0xFFFE, 0x40); // 0x4080;
+        memory.write(0x4080, 0b1111_0000);
+        cpu.register_accumulator = 0b1111_1111;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
     }
 }
