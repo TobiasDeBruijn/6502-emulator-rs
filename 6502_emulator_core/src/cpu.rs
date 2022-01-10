@@ -526,10 +526,155 @@ impl Cpu {
             DEY_IMPLIED => {
                 self.decrement_register(Register::Y, &mut cycles);
             },
+            ASL_ACCUMULATOR => {
+                let carry = self.register_accumulator & 0b1000_0000 != 0;
+                self.register_accumulator <<=  1;
+                self.flags.set(CpuStatusFlags::CARRY, carry);
+                self.flags.set(CpuStatusFlags::ZERO, self.register_accumulator == 0);
+                self.flags.set(CpuStatusFlags::NEGATIVE, self.register_accumulator & NEGATIVE_BIT != 0);
+                cycles -= 1;
+            },
+            ASL_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.arithmetic_shift_left(memory, zp_address as u16, &mut cycles);
+            },
+            ASL_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.arithmetic_shift_left(memory, addr, &mut cycles);
+            },
+            ASL_ABSOLUTE => {
+                let addr = self.fetch_word(memory, &mut cycles);
+                self.arithmetic_shift_left(memory, addr, &mut cycles);
+            },
+            ASL_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x_5(memory, &mut cycles);
+                self.arithmetic_shift_left(memory, addr, &mut cycles);
+            },
+            LSR_ACCUMULATOR => {
+                let carry = self.register_accumulator & 0b1 != 0;
+                self.register_accumulator >>= 1;
+                self.flags.set(CpuStatusFlags::CARRY, carry);
+                self.flags.set(CpuStatusFlags::ZERO, self.register_accumulator == 0);
+                // Shifting right means the 7th bit will be set to zero
+                // i.e this flag is always false
+                self.flags.set(CpuStatusFlags::NEGATIVE, false);
+                cycles -= 1;
+            },
+            LSR_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.logical_shift_right(memory, zp_address as u16, &mut cycles);
+            },
+            LSR_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.logical_shift_right(memory, addr, &mut cycles);
+            },
+            LSR_ABSOLUTE => {
+                let addr = self.fetch_word(memory, &mut cycles);
+                self.logical_shift_right(memory, addr, &mut cycles);
+            },
+            LSR_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x_5(memory, &mut cycles);
+                self.logical_shift_right(memory, addr, &mut cycles);
+            },
+            ROL_ACCUMULATOR => {
+                let set_carry = self.register_accumulator & 0b1000_0000 != 0;
+                self.register_accumulator = self.register_accumulator << 1 | self.flag_as_bit(CpuStatusFlags::CARRY);
+                self.flags.set(CpuStatusFlags::CARRY, set_carry);
+                self.flags.set(CpuStatusFlags::ZERO, self.register_accumulator == 0);
+                self.flags.set(CpuStatusFlags::NEGATIVE, self.register_accumulator & 0b1000_0000 != 0);
+                cycles -= 1;
+            },
+            ROL_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.rotate_left(memory, zp_address as u16, &mut cycles);
+            },
+            ROL_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.rotate_left(memory, addr, &mut cycles);
+            },
+            ROL_ABSOLUTE => {
+                let addr = self.fetch_word(memory, &mut cycles);
+                self.rotate_left(memory, addr, &mut cycles);
+            },
+            ROL_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x_5(memory, &mut cycles);
+                self.rotate_left(memory, addr, &mut cycles);
+            },
+            ROR_ACCUMULATOR => {
+                let set_carry = self.register_accumulator & 0b0000_0001 != 0;
+                self.register_accumulator = self.register_accumulator >> 1 | (self.flag_as_bit(CpuStatusFlags::CARRY) << 7);
+                self.flags.set(CpuStatusFlags::CARRY, set_carry);
+                self.flags.set(CpuStatusFlags::ZERO, self.register_accumulator == 0);
+                self.flags.set(CpuStatusFlags::NEGATIVE, self.register_accumulator & 0b1000_0000 != 0);
+                cycles -= 1;
+            },
+            ROR_ZERO_PAGE => {
+                let zp_address = self.fetch_byte(memory, &mut cycles);
+                self.rotate_right(memory, zp_address as u16, &mut cycles);
+            },
+            ROR_ZERO_PAGE_X => {
+                let addr = self.addr_zero_page_x(memory, &mut cycles);
+                self.rotate_right(memory, addr, &mut cycles);
+            },
+            ROR_ABSOLUTE => {
+                let addr = self.fetch_word(memory, &mut cycles);
+                self.rotate_right(memory, addr, &mut cycles);
+            },
+            ROR_ABSOLUTE_X => {
+                let addr = self.addr_absolute_x_5(memory, &mut cycles);
+                self.rotate_right(memory, addr, &mut cycles);
+            },
             _ => {}
         }
 
         cycles
+    }
+
+    /// Retrieve a CPU Status flag as a byte.
+    /// The value of the flag is stored in the least significant bit,
+    /// the other 7 bits will be zeroes.
+    fn flag_as_bit(&self, flag: CpuStatusFlags) -> u8 {
+        let bits = self.flags.bits();
+        match flag {
+            CpuStatusFlags::CARRY => bits & 0b0000_0001,
+            CpuStatusFlags::ZERO => bits & 0b0000_0010 >> 1,
+            CpuStatusFlags::IRQ_DISABLE => bits & 0b0000_0100 >> 2,
+            CpuStatusFlags::DECIMAL_MODE => bits & 0b0000_1000 >> 3,
+            CpuStatusFlags::BREAK_COMMAND => bits & 0b0001_0000 >> 4,
+            CpuStatusFlags::OVERFLOW => bits & 0b0100_0000 >> 6,
+            CpuStatusFlags::NEGATIVE => bits & 0b1000_0000 >> 7,
+            _ => unreachable!("Unknown CPU status flag")
+        }
+    }
+
+    /// Rotate bits in the value at the provided address in memory to the left.
+    /// New bit 0 is filled with the current value of the `Carry` flag. Old bit 7 is put into the `Carry` flag.
+    /// This function affects the `Carry`, `Zero` and `Negative` flags
+    fn rotate_left(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, address: u16, cycles: &mut u32) {
+        let value = Self::read_byte(memory, address, cycles);
+        let shifted = value << 1 | self.flag_as_bit(CpuStatusFlags::CARRY);
+
+        self.flags.set(CpuStatusFlags::CARRY, value & 0b1000_0000 != 0);
+        self.flags.set(CpuStatusFlags::ZERO, shifted == 0);
+        self.flags.set(CpuStatusFlags::NEGATIVE, shifted & 0b1000_0000 != 0);
+
+        Self::write_byte(memory, address, shifted, cycles);
+        *cycles -= 1;
+    }
+
+    /// Rotate bits in the value at the provided address in memory to the right.
+    /// New bit 7 is filled with the current value of the `Carry` flag. Old bit 0 is put into the `Carry` flag.
+    /// This function affects the `Carry`, `Zero`, and `Negative` flags
+    fn rotate_right(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, address: u16, cycles: &mut u32) {
+        let value = Self::read_byte(memory, address, cycles);
+        let shifted = value >> 1 | (self.flag_as_bit(CpuStatusFlags::CARRY) << 7);
+
+        self.flags.set(CpuStatusFlags::CARRY, value & 0b0000_0001 != 0);
+        self.flags.set(CpuStatusFlags::ZERO, shifted == 0);
+        self.flags.set(CpuStatusFlags::NEGATIVE, shifted & 0b1000_0000 != 0);
+
+        Self::write_byte(memory, address, shifted, cycles);
+        *cycles -= 1;
     }
 
     /// Increment a location in memory
@@ -600,7 +745,7 @@ impl Cpu {
 
         // TODO overflow flag isn't set correct
 
-        let sign_bits_eq = !(((self.register_accumulator ^ value) & NEGATIVE_BIT) != 0);
+        let sign_bits_eq = !((self.register_accumulator ^ value) & NEGATIVE_BIT) == 0;
 
         let carry_bit: u8 = if self.flags.intersects(CpuStatusFlags::CARRY) {
             0b1
@@ -614,6 +759,38 @@ impl Cpu {
 
         self.flags.set(CpuStatusFlags::CARRY, sum > 0xFF);
         self.flags.set(CpuStatusFlags::OVERFLOW, sign_bits_eq && ((self.register_accumulator ^ value) & NEGATIVE_BIT) != 0);
+    }
+
+    /// Perform an arithmetic shift left on the value at the provided address in memory.
+    /// The effect of this function is that the value gets multiplied by 2
+    /// This affects the `Carry`, `Zero` and `Negative` flags.
+    fn arithmetic_shift_left(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, address: u16, cycles: &mut u32) {
+        let value = Self::read_byte(memory, address, cycles);
+        let carry = value & 0b1000_0000 != 0;
+        let shifted = value << 1;
+
+        Self::write_byte(memory, address, shifted, cycles);
+        self.flags.set(CpuStatusFlags::CARRY, carry);
+        self.flags.set(CpuStatusFlags::ZERO, shifted == 0);
+        self.flags.set(CpuStatusFlags::NEGATIVE, shifted & NEGATIVE_BIT != 0);
+
+        *cycles -= 1;
+    }
+
+    /// Perform a logical shift right on the value at the provided address in memory.
+    /// The effects of this function is that the value gets divided by 2.
+    /// This affects the `Carry`, `Zero` and `Negative` flags.
+    fn logical_shift_right(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, address: u16, cycles: &mut u32) {
+        let value = Self::read_byte(memory, address, cycles);
+        let carry = value & 0b1 != 0;
+        let shifted = value >> 1;
+
+        Self::write_byte(memory, address, shifted, cycles);
+        self.flags.set(CpuStatusFlags::CARRY, carry);
+        self.flags.set(CpuStatusFlags::ZERO, shifted == 0);
+        self.flags.set(CpuStatusFlags::NEGATIVE, false);
+
+        *cycles -= 1;
     }
 
     /// Subtract with carry. Affects the Carry and Overflow flags
@@ -2915,7 +3092,7 @@ mod test {
     }
 
     #[test]
-    fn inx() {
+    fn inx_implied() {
         init();
         let mut cpu = Cpu::default();
         let mut memory = BasicMemory::default();
@@ -2947,7 +3124,7 @@ mod test {
     }
 
     #[test]
-    fn iny() {
+    fn iny_implied() {
         init();
         let mut cpu = Cpu::default();
         let mut memory = BasicMemory::default();
@@ -3136,5 +3313,387 @@ mod test {
         assert_eq!(cpu.register_y, 0x00);
         assert!(cpu.flags.intersects(CpuStatusFlags::ZERO));
         assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn asl_accumulator() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ASL_ACCUMULATOR);
+        cpu.register_accumulator = 0b1010_1010;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0101_0100);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn asl_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ASL_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b1010_1010);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x20), 0b0101_0100);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn asl_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ASL_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b1010_1010);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x30), 0b0101_0100);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn asl_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ASL_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        memory.write(0x4020, 0b1010_1010);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x4020), 0b0101_0100);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn asl_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ASL_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.register_x = 0x10;
+        memory.write(0x4030, 0b1010_1010);
+
+        let cycles_left = cpu.execute_single(&mut memory, 7);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x4030), 0b0101_0100);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn lsr_accumulator() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, LSR_ACCUMULATOR);
+        cpu.register_accumulator = 0b0101_0101;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0010_1010);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn lsr_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, LSR_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b0101_0101);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x20), 0b0010_1010);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn lsr_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, LSR_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b0101_0101);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x30), 0b0010_1010);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn lsr_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, LSR_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        memory.write(0x4020, 0b0101_0101);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x4020), 0b0010_1010);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn lsr_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, LSR_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.register_x = 0x10;
+        memory.write(0x4030, 0b0101_0101);
+
+        let cycles_left = cpu.execute_single(&mut memory, 7);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x4030), 0b0010_1010);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn rol_accumulator() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROL_ACCUMULATOR);
+        cpu.register_accumulator = 0b1010_1010;
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b0101_0101);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn rol_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROL_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x20), 0b0101_0101);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn rol_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROL_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x30), 0b0101_0101);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn rol_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROL_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x80); // 0x8020
+        memory.write(0x8020, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x8020), 0b0101_0101);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn rol_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROL_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x80); // 0x8020
+        cpu.register_x = 0x10;
+        memory.write(0x8030, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 7);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x8030), 0b0101_0101);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn ror_accumulator() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROR_ACCUMULATOR);
+        cpu.register_accumulator = 0b1010_1010;
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b11010101);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn ror_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROR_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x20), 0b11010101);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn ror_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROR_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x30), 0b11010101);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn ror_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROR_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x80); // 0x8020
+        memory.write(0x8020, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x8020), 0b11010101);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn ror_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ROR_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x80); // 0x8020
+        cpu.register_x = 0x10;
+        memory.write(0x8030, 0b1010_1010);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 7);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(memory.read(0x8030), 0b11010101);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
     }
 }
