@@ -8,7 +8,6 @@ use log::debug;
 
 const NEGATIVE_BIT: u8 = 0b1000_0000;
 
-
 pub struct Cpu {
     program_counter: u16,
     #[allow(unused)]
@@ -18,10 +17,25 @@ pub struct Cpu {
     register_x: u8,
     register_y: u8,
 
-    flags: CpuStatusFlags
+    flags: CpuStatusFlags,
+
+    mode: OperatingMode
+}
+
+/// This indicates what 6502 'version' to use. This affects certain instructions like `JMP`
+pub enum OperatingMode {
+    /// The Mos mode uses the 'old' mode, i.e with it's bugs
+    /// The most notable bug is in the `JMP` instruction:
+    /// ```text
+    /// An original 6502 has does not correctly fetch the target address if the indirect vector falls on a page boundary (e.g. $xxFF where xx is any value from $00 to $FF). In this case fetches the LSB from $xxFF as expected but takes the MSB from $xx00. This is fixed in some later chips like the 65SC02 so for compatibility always ensure the indirect vector is not at the end of the page.
+    /// ```
+    Mos,
+    /// The Wdc mode is the 'modern' mode, with the applied bugfixes, most notably the `JMP` bug
+    Wdc,
 }
 
 impl Default for Cpu {
+    /// Create a default `CPU`. This sets the stack pointer to `0xFF` and the program counter to `0xFFFC`
     fn default() -> Self {
         Self {
             program_counter: 0xFFFC,
@@ -30,11 +44,25 @@ impl Default for Cpu {
             register_x: 0,
             register_y: 0,
             flags: CpuStatusFlags::default(),
+            mode: OperatingMode::Wdc,
         }
     }
 }
 
 impl Cpu {
+    /// Create a new `CPU`. Equivalent to [Self::default]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new `CPU` with a set [OperatingMode]
+    pub fn with_mode(mode: OperatingMode) -> Self {
+        Self {
+            mode,
+            ..Self::default()
+        }
+    }
+
     /// Reset the CPU
     pub fn reset(&mut self) {
         #[cfg(test)]
@@ -624,6 +652,23 @@ impl Cpu {
                 let addr = self.addr_absolute_x_5(memory, &mut cycles);
                 self.rotate_right(memory, addr, &mut cycles);
             },
+            JMP_ABSOLUTE => {
+                let addr = self.fetch_word(memory, &mut cycles);
+                self.program_counter = addr;
+            },
+            JMP_INDIRECT => {
+                let addr = self.fetch_word(memory, &mut cycles);
+
+                let effective_addr = match self.mode {
+                    OperatingMode::Mos => {
+                        let low = Self::read_byte(memory, addr, &mut cycles) as u16;
+                        let high = Self::read_byte(memory, addr & 0xFF00, &mut cycles) as u16;
+                        high << 8 | low
+                    },
+                    OperatingMode::Wdc => Self::read_word(memory, addr, &mut cycles)
+                };
+                self.program_counter = effective_addr;
+            }
             _ => {}
         }
 
@@ -1161,7 +1206,7 @@ enum LogicalOperation {
 mod test {
     use log::LevelFilter;
     use crate::cpu::{Cpu, CpuStatusFlags};
-    use crate::Memory;
+    use crate::{Memory, OperatingMode};
     use crate::memory::BasicMemory;
     use crate::ops::*;
 
@@ -3695,5 +3740,57 @@ mod test {
         assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
         assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
         assert!(!cpu.flags.intersects(CpuStatusFlags::ZERO));
+    }
+
+    #[test]
+    fn jmp_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, JMP_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x4020);
+    }
+
+    #[test]
+    fn jmp_indirect_mos() {
+        init();
+        let mut cpu = Cpu::with_mode(OperatingMode::Mos);
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, JMP_INDIRECT);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40);
+        // We'd expect 0x4020, however due to a bug in older 6502's,
+        // the least significant byte will be fetched from 0x4020, as normal
+        // but the most significant byte will be fetched from 0x4000, rather than 0x4021
+        memory.write(0x4020, 0x60);
+        memory.write(0x4000, 0x70); // 0x7060
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x7060);
+    }
+
+    #[test]
+    fn jmp_indirect_wdc() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, JMP_INDIRECT);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        memory.write(0x4020, 0x60);
+        memory.write(0x4021, 0x70); // 0x7060
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x7060);
     }
 }

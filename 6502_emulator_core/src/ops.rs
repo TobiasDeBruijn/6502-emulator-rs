@@ -154,3 +154,6 @@ pub const ROR_ZERO_PAGE: u8 = 0x66;
 pub const ROR_ZERO_PAGE_X: u8 = 0x76;
 pub const ROR_ABSOLUTE: u8 = 0x6E;
 pub const ROR_ABSOLUTE_X: u8 = 0x7E;
+
+pub const JMP_ABSOLUTE: u8 = 0x4C;
+pub const JMP_INDIRECT: u8 = 0x6C;
