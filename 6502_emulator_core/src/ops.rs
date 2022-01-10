@@ -157,3 +157,6 @@ pub const ROR_ABSOLUTE_X: u8 = 0x7E;
 
 pub const JMP_ABSOLUTE: u8 = 0x4C;
 pub const JMP_INDIRECT: u8 = 0x6C;
+
+pub const JSR_ABSOLUTE: u8 = 0x20;
+pub const RTS_IMPLIED: u8 = 0x60;

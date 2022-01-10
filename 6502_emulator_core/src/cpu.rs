@@ -227,39 +227,20 @@ impl Cpu {
                 self.transfer_register(Register::X, Register::S, &mut cycles);
             },
             PHA_IMPLIED => {
-                // The stack runs from 0x0100 - 0x01FF
-                // But the stack pointer stores only the least significant byte
-                Self::write_byte(memory, 0x0100 + (self.stack_pointer as u16), self.register_accumulator, &mut cycles);
-                self.stack_pointer = (Wrapping(self.stack_pointer) + Wrapping(1)).0;
-                cycles -= 1;
+                self.stack_push(memory, self.register_accumulator, &mut cycles);
             },
             PHP_IMPLIED => {
-                // The stack runs from 0x0100 - 0x01FF
-                // But the stack pointer stores only the least significant byte
-                Self::write_byte(memory, 0x0100 + (self.stack_pointer as u16), self.flags.bits(), &mut cycles);
-                self.stack_pointer = (Wrapping(self.stack_pointer) + Wrapping(1)).0;
-                cycles -= 1;
+                self.stack_push(memory, self.flags.bits(), &mut cycles);
             },
             PLA_IMPLIED => {
-                // The stack pointer points to the next free byte,
-                // Decrement the stack pointer *before* reading it
-                self.stack_pointer = (Wrapping(self.stack_pointer) - Wrapping(1)).0;
-                cycles -= 1;
-                // The stack runs from 0x0100 - 0x01FF,
-                // the stack pointer represents least significant byte of the address
-                self.load_register(memory, Register::A, 0x0100 + (self.stack_pointer as u16), &mut cycles);
+                let value = self.stack_pop(memory, &mut cycles);
+                self.set_register(Register::A, value);
                 cycles -= 1;
             },
             PLP_IMPLIED => {
-                // The stack pointer points to the next free byte,
-                // Decrement the stack pointer *before* reading it
-                self.stack_pointer = (Wrapping(self.stack_pointer) - Wrapping(1)).0;
-                cycles -= 1;
-                // The stack runs from 0x0100 - 0x01FF,
-                // the stack pointer represents least significant byte of the address
-                let byte = Self::read_byte(memory, 0x0100 + (self.stack_pointer as u16), &mut cycles);
+                let byte = self.stack_pop(memory, &mut cycles);
                 self.flags = CpuStatusFlags::from_bits_truncate(byte);
-                cycles -= 1
+                cycles -= 1;
             },
             AND_IMMEDIATE => {
                 let value = self.fetch_byte(memory, &mut cycles);
@@ -668,11 +649,68 @@ impl Cpu {
                     OperatingMode::Wdc => Self::read_word(memory, addr, &mut cycles)
                 };
                 self.program_counter = effective_addr;
+            },
+            JSR_ABSOLUTE => {
+                let target_addr = self.fetch_word(memory, &mut cycles);
+
+                // We dont add anything because the JSR is byte 0, then the target_addr is byte 1 and 2,
+                // so the next instruction is byte 3.
+                // The PC is currently at byte 3, because fetching the instruction
+                // increments it, and fetching a word increments it twice
+                let src_addr = self.program_counter as u16;
+                let low = (src_addr & 0xFF) as u8;
+                let high = (src_addr >> 8) as u8;
+
+                // The stack runs from 0x0100 - 0x01FF
+                // But the stack pointer stores only the least significant byte
+                Self::write_byte(memory, 0x0100 + (self.stack_pointer as u16), low, &mut cycles);
+                self.stack_pointer = (Wrapping(self.stack_pointer) + Wrapping(1)).0;
+                Self::write_byte(memory, 0x0100 + (self.stack_pointer as u16), high, &mut cycles);
+                self.stack_pointer = (Wrapping(self.stack_pointer) + Wrapping(1)).0;
+
+                self.program_counter = target_addr;
+
+                cycles -= 1;
+            },
+            RTS_IMPLIED => {
+                // The stack is literally a stack of addresses,
+                // the 6502 is little endian, so the LSB gets put on the stack first,
+                // followed by the MSB. This means, that the MSB must be popped first,
+                // followed by the LSB.
+                let ret_high = self.stack_pop(memory, &mut cycles) as u16;
+                let ret_low = self.stack_pop(memory, &mut cycles) as u16;
+                let ret = ret_high << 8 | ret_low;
+                self.program_counter = ret;
+                cycles -= 1;
             }
+
             _ => {}
         }
 
         cycles
+    }
+
+    fn stack_push(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, value: u8, cycles: &mut u32) {
+        // The stack runs from 0x0100 - 0x01FF
+        // But the stack pointer stores only the least significant byte
+        Self::write_byte(memory, 0x0100 + (self.stack_pointer as u16), value, cycles);
+        self.stack_pointer = (Wrapping(self.stack_pointer) + Wrapping(1)).0;
+        *cycles -= 1;
+    }
+
+    fn stack_pop(&mut self, memory: &dyn Memory<MAX_MEMORY>, cycles: &mut u32) -> u8 {
+        // The stack pointer points to the next free byte,
+        // Decrement the stack pointer *before* reading it
+        self.stack_pointer = (Wrapping(self.stack_pointer) - Wrapping(1)).0;
+        *cycles -= 1;
+        // The stack runs from 0x0100 - 0x01FF,
+        // the stack pointer represents least significant byte of the address
+        let value = Self::read_byte(memory, 0x0100 + (self.stack_pointer as u16), cycles);
+
+        #[cfg(test)]
+        debug!("Popped {:#04X} from stack. Stack pointer is now at next free byte {:#04X}", value, self.stack_pointer);
+
+        value
     }
 
     /// Retrieve a CPU Status flag as a byte.
@@ -1204,6 +1242,7 @@ enum LogicalOperation {
 
 #[cfg(test)]
 mod test {
+    use core::num::Wrapping;
     use log::LevelFilter;
     use crate::cpu::{Cpu, CpuStatusFlags};
     use crate::{Memory, OperatingMode};
@@ -3792,5 +3831,80 @@ mod test {
         let cycles_left = cpu.execute_single(&mut memory, 5);
         assert_eq!(cycles_left, 0);
         assert_eq!(cpu.program_counter, 0x7060);
+    }
+
+    #[test]
+    fn jsr_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, JSR_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x4020);
+        // LSB of return address
+        assert_eq!(memory.read(0x0100 + (Wrapping(cpu.stack_pointer) - Wrapping(2)).0 as u16), 0xFF);
+        // MSB of return address
+        assert_eq!(memory.read(0x0100 + ((Wrapping(cpu.stack_pointer) - Wrapping(1)).0 as u16)), 0xFF);
+    }
+
+    #[test]
+    fn rts_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, RTS_IMPLIED);
+
+        // 0x0140 is the next free byte,
+        // i.e the return address is at 0x013F and 0x013E
+        cpu.stack_pointer = 0x40;
+        memory.write(0x013E, 0x20);
+        memory.write(0x013F, 0x40); // 0x4020
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x4020);
+        assert_eq!(cpu.stack_pointer, 0x3E);
+    }
+
+    #[test]
+    fn full_jump() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.program_counter = 0x8000;
+        memory.write(0x8000, JSR_ABSOLUTE);
+        memory.write(0x8001, 0x40);
+        memory.write(0x8002, 0x20); // 0x2040
+
+        // The subroutine
+        memory.write(0x2040, LDA_IMMEDIATE);
+        memory.write(0x2041, 0x32);
+        memory.write(0x2042, RTS_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.program_counter, 0x8003);
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        // Check if the next instruction will execute fine
+        memory.write(0x8003, LDX_IMMEDIATE);
+        memory.write(0x8004, 0x64);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x8005);
+        assert_eq!(cpu.register_x, 0x64);
     }
 }
