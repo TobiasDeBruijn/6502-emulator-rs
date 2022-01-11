@@ -682,14 +682,38 @@ impl Cpu {
                 let ret = ret_high << 8 | ret_low;
                 self.program_counter = ret;
                 cycles -= 1;
-            }
-
+            },
+            BCS_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::CARRY, true, &mut cycles);
+            },
+            BCC_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::CARRY, false, &mut cycles);
+            },
+            BEQ_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::ZERO, true, &mut cycles);
+            },
+            BNE_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::ZERO, false, &mut cycles);
+            },
+            BMI_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::NEGATIVE, true, &mut cycles);
+            },
+            BPL_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::NEGATIVE, false, &mut cycles);
+            },
+            BVS_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::OVERFLOW, true, &mut cycles);
+            },
+            BVC_RELATIVE => {
+                self.branch(memory, CpuStatusFlags::OVERFLOW, false, &mut cycles);
+            },
             _ => {}
         }
 
         cycles
     }
 
+    /// Push a value to the stack
     fn stack_push(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, value: u8, cycles: &mut u32) {
         // The stack runs from 0x0100 - 0x01FF
         // But the stack pointer stores only the least significant byte
@@ -698,6 +722,7 @@ impl Cpu {
         *cycles -= 1;
     }
 
+    /// Pop a value from the stack
     fn stack_pop(&mut self, memory: &dyn Memory<MAX_MEMORY>, cycles: &mut u32) -> u8 {
         // The stack pointer points to the next free byte,
         // Decrement the stack pointer *before* reading it
@@ -727,6 +752,36 @@ impl Cpu {
             CpuStatusFlags::OVERFLOW => bits & 0b0100_0000 >> 6,
             CpuStatusFlags::NEGATIVE => bits & 0b1000_0000 >> 7,
             _ => unreachable!("Unknown CPU status flag")
+        }
+    }
+
+    /// Branch if the condition is met, i.e. the value of the provided flag is equal to the wanted state.
+    /// Takes 1 cycle if the condition is not met. 2 If it is met, or 3 if it is met and the new `program_counter`
+    /// is on a new page.
+    fn branch(&mut self, memory: &dyn Memory<MAX_MEMORY>, flag: CpuStatusFlags, state: bool, cycles: &mut u32) {
+        let rel_addr = self.fetch_byte(memory, cycles);
+        let status = self.flags.intersects(flag);
+
+        if status == state {
+            *cycles -= 1;
+
+            /*let new_pc = if (rel_addr as i8) < 0 {
+                #[cfg(test)]
+                debug!("Subtracting {} ({:#010b})", rel_addr as i8, rel_addr);
+                self.program_counter as i16 - rel_addr as i8 as i16
+            } else {
+                self.program_counter as i16 + rel_addr as i16
+            } as u16;*/
+            let new_pc = (self.program_counter as i16 + (rel_addr as i8 as i16)) as u16;
+
+            #[cfg(test)]
+            debug!("Flag {:?} is {}. Branching to {:#06X}", flag, state, new_pc);
+
+            if (new_pc ^ self.program_counter) >> 8 != 0 {
+                *cycles -= 1;
+            }
+
+            self.program_counter = new_pc;
         }
     }
 
@@ -3906,5 +3961,221 @@ mod test {
         assert_eq!(cycles_left, 0);
         assert_eq!(cpu.program_counter, 0x8005);
         assert_eq!(cpu.register_x, 0x64);
+    }
+
+    #[test]
+    fn bcc_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::CARRY, false);
+        memory.write(0xFFFC, BCC_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn bcs_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        memory.write(0xFFFC, BCS_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::CARRY, false);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn beq_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::ZERO, true);
+        memory.write(0xFFFC, BEQ_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::ZERO, false);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn bne_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::ZERO, false);
+        memory.write(0xFFFC, BNE_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::ZERO, true);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn bmi_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::NEGATIVE, true);
+        memory.write(0xFFFC, BMI_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::NEGATIVE, false);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn bpl_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::NEGATIVE, false);
+        memory.write(0xFFFC, BPL_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::NEGATIVE, true);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn bvs_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::OVERFLOW, true);
+        memory.write(0xFFFC, BVS_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::OVERFLOW, false);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn bvc_relative() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::OVERFLOW, false);
+        memory.write(0xFFFC, BVC_RELATIVE);
+        memory.write(0xFFFD, -10_i8 as u8);
+
+        memory.write(0xFFF4, LDA_IMMEDIATE);
+        memory.write(0xFFF5, 0x32);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFF4);
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+
+        assert_eq!(cpu.register_accumulator, 0x32);
+
+        cpu.reset();
+        cpu.flags.set(CpuStatusFlags::OVERFLOW, true);
+        cpu.execute_single(&mut memory, 2);
+        assert_eq!(cpu.program_counter, 0xFFFE);
     }
 }
