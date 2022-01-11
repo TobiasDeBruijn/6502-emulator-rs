@@ -950,26 +950,27 @@ impl Cpu {
 
     /// Add with carry. Affects the Carry and Overflow flags
     fn add_with_carry(&mut self, value: u8) {
-        if self.flags.intersects(CpuStatusFlags::DECIMAL_MODE) {
-            todo!("Decimal mode hasn't been implemented yet")
-        }
+        let a_before = self.register_accumulator;
+        let c_before = self.flag_as_bit(CpuStatusFlags::CARRY);
 
-        // TODO overflow flag isn't set correct
+        let sum = a_before as u16 + value as u16 + c_before as u16;
 
-        let sign_bits_eq = !((self.register_accumulator ^ value) & NEGATIVE_BIT) == 0;
-
-        let carry_bit: u8 = if self.flags.intersects(CpuStatusFlags::CARRY) {
-            0b1
-        } else {
-            0
-        };
-
-        // We perform this operation as a u16 to avoid panics on overflow or underflow
-        let sum = self.register_accumulator as u16 + value as u16 + carry_bit as u16;
-        self.set_register(Register::A, (sum & 0xFF) as u8);
-
+        // Carry flag is set if the higher byte is not zero,
+        // E.g. 0b0001_1111 will have a carry, as it is larger than 0xFF (0b1111)
         self.flags.set(CpuStatusFlags::CARRY, sum > 0xFF);
-        self.flags.set(CpuStatusFlags::OVERFLOW, sign_bits_eq && ((self.register_accumulator ^ value) & NEGATIVE_BIT) != 0);
+
+        // Remove the high byte
+        // E.g. 0b0001_1111 will become 0b0000_0000 because 0xFF is 0b0000_1111
+        // We can then safely cast to an u8
+        let a_after = (sum & 0xFF) as u8;
+
+        // Overflow flag indicates that the sign has changed improperly
+        // E.g. if you add two positive numbers and get a negative result
+        let sign_bits_eq_before = (a_before ^ value) & NEGATIVE_BIT == 0;
+        let sign_bits_ne_after = (a_after ^ value) & NEGATIVE_BIT != 0;
+        self.flags.set(CpuStatusFlags::OVERFLOW, sign_bits_eq_before & sign_bits_ne_after);
+
+        self.set_register(Register::A, a_after);
     }
 
     /// Perform an arithmetic shift left on the value at the provided address in memory.
@@ -2810,15 +2811,15 @@ mod test {
         memory.reset();
 
         memory.write(0xFFFC, ADC_IMMEDIATE);
-        memory.write(0xFFFD, 0xFF);
-        cpu.register_accumulator = 0xFF;
+        memory.write(0xFFFD, 1);
+        cpu.register_accumulator = 127;
 
         let cycles_left = cpu.execute_single(&mut memory, 2);
         assert_eq!(cycles_left, 0);
         // TODO: Broken
-     //  assert_eq!(cpu.register_accumulator, 0xE);
-     //   assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
-     //   assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+        assert_eq!(cpu.register_accumulator, 128);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
     }
 
     // TODO: ADC and SBC tests
