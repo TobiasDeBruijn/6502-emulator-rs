@@ -8,6 +8,8 @@ use log::debug;
 
 const NEGATIVE_BIT: u8 = 0b1000_0000;
 
+const IRQ_INTERRUPT_VECTOR: u16 = 0xFFFE;
+
 pub struct Cpu {
     program_counter: u16,
     #[allow(unused)]
@@ -19,7 +21,7 @@ pub struct Cpu {
 
     flags: CpuStatusFlags,
 
-    mode: OperatingMode
+    mode: OperatingMode,
 }
 
 /// This indicates what 6502 'version' to use. This affects certain instructions like `JMP`
@@ -228,20 +230,24 @@ impl Cpu {
             },
             PHA_IMPLIED => {
                 self.stack_push(memory, self.register_accumulator, &mut cycles);
+                cycles -= 1;
             },
             PHP_IMPLIED => {
                 self.stack_push(memory, self.flags.bits(), &mut cycles);
+                cycles -= 1;
             },
             PLA_IMPLIED => {
                 let value = self.stack_pop(memory, &mut cycles);
                 self.set_register(Register::A, value);
-                cycles -= 1;
+                cycles -= 2;
             },
             PLP_IMPLIED => {
                 let byte = self.stack_pop(memory, &mut cycles);
                 self.flags = CpuStatusFlags::from_bits_truncate(byte);
-                cycles -= 1;
+                cycles -= 2;
             },
+
+            // Logical
             AND_IMMEDIATE => {
                 let value = self.fetch_byte(memory, &mut cycles);
                 self.logical_operation(value, LogicalOperation::And);
@@ -346,6 +352,8 @@ impl Cpu {
                 let address = self.fetch_word(memory, &mut cycles);
                 self.bit_test(memory, address, &mut cycles);
             },
+
+            // Arithmetic
             ADC_IMMEDIATE => {
                 let value = self.fetch_byte(memory, &mut cycles);
                 self.add_with_carry(value);
@@ -491,6 +499,8 @@ impl Cpu {
                 let value = Self::read_byte(memory, addr, &mut cycles);
                 self.compare_to_register(Register::Y, value);
             },
+
+            // Increments & Decrements
             INC_ZERO_PAGE => {
                 let zp_addr = self.fetch_byte(memory, &mut cycles);
                 self.increment_memory(memory, zp_addr as u16, &mut cycles);
@@ -535,6 +545,8 @@ impl Cpu {
             DEY_IMPLIED => {
                 self.decrement_register(Register::Y, &mut cycles);
             },
+
+            // Shifts
             ASL_ACCUMULATOR => {
                 let carry = self.register_accumulator & 0b1000_0000 != 0;
                 self.register_accumulator <<=  1;
@@ -633,6 +645,8 @@ impl Cpu {
                 let addr = self.addr_absolute_x_5(memory, &mut cycles);
                 self.rotate_right(memory, addr, &mut cycles);
             },
+
+            // Jumps & Calls
             JMP_ABSOLUTE => {
                 let addr = self.fetch_word(memory, &mut cycles);
                 self.program_counter = addr;
@@ -681,8 +695,10 @@ impl Cpu {
                 let ret_low = self.stack_pop(memory, &mut cycles) as u16;
                 let ret = ret_high << 8 | ret_low;
                 self.program_counter = ret;
-                cycles -= 1;
+                cycles -= 3;
             },
+
+            // Branches
             BCS_RELATIVE => {
                 self.branch(memory, CpuStatusFlags::CARRY, true, &mut cycles);
             },
@@ -707,6 +723,65 @@ impl Cpu {
             BVC_RELATIVE => {
                 self.branch(memory, CpuStatusFlags::OVERFLOW, false, &mut cycles);
             },
+
+            // Status Flag Changes
+            CLC_IMPLIED => {
+                self.flags.set(CpuStatusFlags::CARRY, false);
+                cycles -= 1;
+            },
+            CLD_IMPLIED => {
+                self.flags.set(CpuStatusFlags::DECIMAL_MODE, false);
+                cycles -= 1;
+            },
+            CLI_IMPLIED => {
+                self.flags.set(CpuStatusFlags::IRQ_DISABLE, false);
+                cycles -= 1;
+            },
+            CLV_IMPLIED => {
+                self.flags.set(CpuStatusFlags::OVERFLOW, false);
+                cycles -= 1;
+            },
+            SEC_IMPLIED => {
+                self.flags.set(CpuStatusFlags::CARRY, true);
+                cycles -= 1;
+            },
+            SED_IMPLIED => {
+                self.flags.set(CpuStatusFlags::DECIMAL_MODE, true);
+                cycles -= 1;
+            },
+            SEI_IMPLIED => {
+                self.flags.set(CpuStatusFlags::IRQ_DISABLE, true);
+                cycles -= 1;
+            },
+
+            // System functions
+            BRK_IMPLIED => {
+                let low_pc = (self.program_counter & 0xFF) as u8;
+                let high_pc = (self.program_counter >> 8) as u8;
+
+                self.stack_push(memory, low_pc, &mut cycles);
+                self.stack_push(memory, high_pc, &mut cycles);
+                self.stack_push(memory, self.flags.bits(), &mut cycles);
+
+                self.program_counter = Self::read_word(memory, IRQ_INTERRUPT_VECTOR, &mut cycles);
+                self.flags.set(CpuStatusFlags::BREAK_COMMAND, true);
+                cycles -= 1;
+            },
+            NOP_IMPLIED => {
+                cycles -= 1;
+            },
+            RTI_IMPLIED => {
+                let flag_bits = self.stack_pop(memory, &mut cycles);
+                self.flags = CpuStatusFlags::from_bits_truncate(flag_bits);
+
+                let high_pc = self.stack_pop(memory, &mut cycles) as u16;
+                let low_pc = self.stack_pop(memory, &mut cycles) as u16;
+                self.program_counter = high_pc << 8 | low_pc;
+
+                self.flags.set(CpuStatusFlags::BREAK_COMMAND, false);
+
+                cycles -= 2;
+            }
             _ => {}
         }
 
@@ -719,7 +794,6 @@ impl Cpu {
         // But the stack pointer stores only the least significant byte
         Self::write_byte(memory, 0x0100 + (self.stack_pointer as u16), value, cycles);
         self.stack_pointer = (Wrapping(self.stack_pointer) + Wrapping(1)).0;
-        *cycles -= 1;
     }
 
     /// Pop a value from the stack
@@ -727,7 +801,6 @@ impl Cpu {
         // The stack pointer points to the next free byte,
         // Decrement the stack pointer *before* reading it
         self.stack_pointer = (Wrapping(self.stack_pointer) - Wrapping(1)).0;
-        *cycles -= 1;
         // The stack runs from 0x0100 - 0x01FF,
         // the stack pointer represents least significant byte of the address
         let value = Self::read_byte(memory, 0x0100 + (self.stack_pointer as u16), cycles);
@@ -4177,5 +4250,154 @@ mod test {
         cpu.flags.set(CpuStatusFlags::OVERFLOW, true);
         cpu.execute_single(&mut memory, 2);
         assert_eq!(cpu.program_counter, 0xFFFE);
+    }
+
+    #[test]
+    fn clc_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        memory.write(0xFFFC, CLC_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+    }
+
+    #[test]
+    fn cld_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::DECIMAL_MODE, true);
+        memory.write(0xFFFC, CLD_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::DECIMAL_MODE));
+    }
+
+    #[test]
+    fn cli_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::IRQ_DISABLE, true);
+        memory.write(0xFFFC, CLI_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::IRQ_DISABLE));
+    }
+
+    #[test]
+    fn clv_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        cpu.flags.set(CpuStatusFlags::OVERFLOW, true);
+        memory.write(0xFFFC, CLV_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sec_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SEC_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+    }
+
+    #[test]
+    fn sed_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SED_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(cpu.flags.intersects(CpuStatusFlags::DECIMAL_MODE));
+    }
+
+    #[test]
+    fn sei_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SEI_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert!(cpu.flags.intersects(CpuStatusFlags::IRQ_DISABLE));
+    }
+
+    #[test]
+    fn brk_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, BRK_IMPLIED);
+        memory.write(0xFFFE, 0x20);
+        memory.write(0xFFFF, 0x40); // 0x4020;
+
+        let cycles_left = cpu.execute_single(&mut memory, 7);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0x4020);
+        assert!(cpu.flags.intersects(CpuStatusFlags::BREAK_COMMAND));
+    }
+
+    #[test]
+    fn nop_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, NOP_IMPLIED);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.program_counter, 0xFFFD);
+    }
+
+    #[test]
+    fn rti_implied() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, RTI_IMPLIED);
+        cpu.stack_pointer = 0x20;
+
+        memory.write(0x011F, CpuStatusFlags::all().bits());
+        memory.write(0x011E, 0x30); // PC high byte
+        memory.write(0x011D, 0x40); // PC low byte, 0x3040
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert!(cpu.flags.intersects(CpuStatusFlags::ZERO));
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+        assert!(cpu.flags.intersects(CpuStatusFlags::NEGATIVE));
+        assert!(cpu.flags.intersects(CpuStatusFlags::IRQ_DISABLE));
+        assert!(cpu.flags.intersects(CpuStatusFlags::DECIMAL_MODE));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::BREAK_COMMAND));
+        assert_eq!(cpu.program_counter, 0x3040);
     }
 }

@@ -1,7 +1,3 @@
-#[allow(unused)]
-/// No Operation
-pub const NOP: u8 = 0xEA;
-
 /// Load Accumulator
 pub const LDA_IMMEDIATE: u8 = 0xA9;
 /// Load Accumulator
@@ -311,3 +307,25 @@ pub const BPL_RELATIVE: u8 = 0x10;
 pub const BVC_RELATIVE: u8 = 0x50;
 /// Branch if overflow flag set
 pub const BVS_RELATIVE: u8 = 0x70;
+
+/// Clear carry flag
+pub const CLC_IMPLIED: u8 = 0x18;
+/// Clear decimal mode flag
+pub const CLD_IMPLIED: u8 = 0xD8;
+/// Clear interrupt disable flag
+pub const CLI_IMPLIED: u8 = 0x58;
+/// Clear overflow flag
+pub const CLV_IMPLIED: u8 = 0xB8;
+/// Set carry flag
+pub const SEC_IMPLIED: u8 = 0x38;
+/// Set decimal mode flag
+pub const SED_IMPLIED: u8 = 0xF8;
+/// Set interrupt disable flag
+pub const SEI_IMPLIED: u8 = 0x78;
+
+/// Force an interrupt
+pub const BRK_IMPLIED: u8 = 0x00;
+/// No Operation
+pub const NOP_IMPLIED: u8 = 0xEA;
+/// Return from Interrupt
+pub const RTI_IMPLIED: u8 = 0x40;
