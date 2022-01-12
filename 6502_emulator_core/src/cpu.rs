@@ -953,7 +953,11 @@ impl Cpu {
         let a_before = self.register_accumulator;
         let c_before = self.flag_as_bit(CpuStatusFlags::CARRY);
 
+        #[cfg(test)]
+        debug!("{:#04X}", value);
         let sum = a_before as u16 + value as u16 + c_before as u16;
+        #[cfg(test)]
+        debug!("{:#06X}", sum);
 
         // Carry flag is set if the higher byte is not zero,
         // E.g. 0b0001_1111 will have a carry, as it is larger than 0xFF (0b1111)
@@ -1124,7 +1128,6 @@ impl Cpu {
 
         Self::read_word(memory, address_x as u16, cycles)
     }
-
 
     /// In instruction contains the zero page location of the least significant byte of 16 bit address.
     /// The `Y` register is dynamically added to this value to generated the actual target address for operation.
@@ -2806,6 +2809,8 @@ mod test {
         let cycles_left = cpu.execute_single(&mut memory, 2);
         assert_eq!(cycles_left, 0);
         assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
 
         cpu.reset();
         memory.reset();
@@ -2816,13 +2821,326 @@ mod test {
 
         let cycles_left = cpu.execute_single(&mut memory, 2);
         assert_eq!(cycles_left, 0);
-        // TODO: Broken
         assert_eq!(cpu.register_accumulator, 128);
         assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
         assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
     }
 
-    // TODO: ADC and SBC tests
+    #[test]
+    fn adc_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn adc_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn adc_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020;
+        memory.write(0x4020, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn adc_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.register_x = 0x10;
+        memory.write(0x4030, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn adc_absolute_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_ABSOLUTE_Y);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.register_y = 0x10;
+        memory.write(0x4030, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn adc_indirect_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_INDIRECT_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0x40);
+        memory.write(0x31, 0x60); // 0x6040
+
+        memory.write(0x6040, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn adc_indirect_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, ADC_INDIRECT_Y);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0x40);
+        memory.write(0x21, 0x60);
+        cpu.register_y = 0x10;
+        memory.write(0x6050, 0b1000);
+        cpu.register_accumulator = 0b1;
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0b1001);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_immeditate() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_IMMEDIATE);
+        memory.write(0xFFFD, 1);
+        cpu.register_accumulator = 0xF;
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+
+        cpu.reset();
+        memory.reset();
+
+        memory.write(0xFFFC, ADC_IMMEDIATE);
+        memory.write(0xFFFD, 1);
+        cpu.register_accumulator = 127;
+
+        let cycles_left = cpu.execute_single(&mut memory, 2);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 128);
+        assert!(!cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_zero_page() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_ZERO_PAGE);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 1);
+        cpu.register_accumulator = 0xF;
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+
+        let cycles_left = cpu.execute_single(&mut memory, 3);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_zero_page_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_ZERO_PAGE_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.register_x = 0x10;
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        memory.write(0x30, 1);
+        cpu.register_accumulator = 0xF;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_absolute() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_ABSOLUTE);
+        memory.write(0xFFFD, 0x20);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        memory.write(0xFFFE, 0x40); // 0x4020;
+        memory.write(0x4020, 1);
+        cpu.register_accumulator = 0xF;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_absolute_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_ABSOLUTE_X);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.register_x = 0x10;
+        memory.write(0x4030, 1);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        cpu.register_accumulator = 0xF;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_absolute_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_ABSOLUTE_Y);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0xFFFE, 0x40); // 0x4020
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        cpu.register_y = 0x10;
+        memory.write(0x4030, 1);
+        cpu.register_accumulator = 0xF;
+
+        let cycles_left = cpu.execute_single(&mut memory, 4);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_indirect_x() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_INDIRECT_X);
+        memory.write(0xFFFD, 0x20);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        cpu.register_x = 0x10;
+        memory.write(0x30, 0x40);
+        memory.write(0x31, 0x60); // 0x6040
+
+        memory.write(0x6040, 1);
+        cpu.register_accumulator = 0xF;
+
+        let cycles_left = cpu.execute_single(&mut memory, 6);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 0xE);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn sbc_indirect_y() {
+        init();
+        let mut cpu = Cpu::default();
+        let mut memory = BasicMemory::default();
+
+        memory.write(0xFFFC, SBC_INDIRECT_Y);
+        memory.write(0xFFFD, 0x20);
+        memory.write(0x20, 0x40);
+        memory.write(0x21, 0x60);
+        cpu.flags.set(CpuStatusFlags::CARRY, true);
+        cpu.register_y = 0x10;
+        memory.write(0x6050, 2);
+        cpu.register_accumulator = 5;
+
+        let cycles_left = cpu.execute_single(&mut memory, 5);
+        assert_eq!(cycles_left, 0);
+        assert_eq!(cpu.register_accumulator, 3);
+        assert!(cpu.flags.intersects(CpuStatusFlags::CARRY));
+        assert!(!cpu.flags.intersects(CpuStatusFlags::OVERFLOW));
+    }
 
     #[test]
     fn cmp_immediate() {
