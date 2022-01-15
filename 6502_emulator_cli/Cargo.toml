@@ -3,3 +3,13 @@ name = "emulator_6502_cli"
 version = "0.1.0"
 edition = "2021"
 authors = ["Tobias de Bruijn <t.debruijn@array21.dev>"]
+
+[dependencies]
+structopt = "0.3.25"
+env_logger = "0.9.0"
+thiserror = "1.0.30"
+
+
+[dependencies.core]
+path = "../6502_emulator_core"
+package = "emulator_6502_core"

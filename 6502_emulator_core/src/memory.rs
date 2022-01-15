@@ -22,6 +22,12 @@ impl Default for BasicMemory {
     }
 }
 
+impl From<&[u8]> for BasicMemory {
+    fn from(i: &[u8]) -> Self {
+        Self { data: i.try_into().expect("Invalid length") }
+    }
+}
+
 impl Memory<MAX_MEMORY> for BasicMemory {
     /// Reset the memory
     fn reset(&mut self) {

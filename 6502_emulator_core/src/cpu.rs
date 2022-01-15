@@ -9,6 +9,7 @@ use log::debug;
 const NEGATIVE_BIT: u8 = 0b1000_0000;
 
 const IRQ_INTERRUPT_VECTOR: u16 = 0xFFFE;
+const RESET_VECTOR: u16 = 0xFFFC;
 
 pub struct Cpu {
     program_counter: u16,
@@ -40,7 +41,7 @@ impl Default for Cpu {
     /// Create a default `CPU`. This sets the stack pointer to `0xFF` and the program counter to `0xFFFC`
     fn default() -> Self {
         Self {
-            program_counter: 0xFFFC,
+            program_counter: RESET_VECTOR,
             stack_pointer: 0xFF,
             register_accumulator: 0,
             register_x: 0,
@@ -71,6 +72,24 @@ impl Cpu {
         debug!("Resetting CPU");
 
         *self = Self::default();
+    }
+
+    pub fn execute_instructions(&mut self, memory: &mut dyn Memory<MAX_MEMORY>, instructions: u16) {
+        #[cfg(test)]
+        debug!("Hey!");
+        // Set the program counter
+        let mut cycles = u32::MAX;
+        self.program_counter = Self::read_word(memory, RESET_VECTOR, &mut cycles);
+
+        for _ in 0..instructions {
+            self.execute_single(memory, u32::MAX);
+        }
+    }
+
+    pub fn execute(&mut self, memory: &mut dyn Memory<MAX_MEMORY>) {
+        loop {
+            self.execute_single(memory, u32::MAX);
+        }
     }
 
     /// Execute instructions
