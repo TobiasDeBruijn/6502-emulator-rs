@@ -1,5 +1,4 @@
 mod opts;
-mod error;
 
 fn main() {
     log_init();
